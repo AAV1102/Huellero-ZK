@@ -231,6 +231,10 @@ def zk_connect(ip: Optional[str]):
         return None
 
 # ──────────────── UIDs ─────────────────────────────────────
+def is_uid_in_valid_range(uid: int) -> bool:
+    """Verifica si el UID está en el rango válido para el dispositivo."""
+    return 1 <= uid <= 32767
+
 def next_uid_for_sede(sede: str) -> Optional[int]:
     """Obtiene el siguiente UID disponible para una sede."""
     if sede not in SEDES:
@@ -238,13 +242,14 @@ def next_uid_for_sede(sede: str) -> Optional[int]:
     
     ip = SEDES[sede][0]
     ids = {int(r["UID"]) for r in read_csv(CSV_FILE) 
-           if r["UID"].isdigit() and r["Sede"] == sede}
+           if r["UID"].isdigit() and r["Sede"] == sede and is_uid_in_valid_range(int(r["UID"]))}
     
     conn = zk_connect(ip)
     try:
         if conn:
             users = conn.get_users()
-            ids.update(int(u.uid) for u in users if str(u.uid).isdigit())
+            ids.update(int(u.uid) for u in users 
+                      if str(u.uid).isdigit() and is_uid_in_valid_range(int(u.uid)))
     except Exception as e:
         logging.error(f"Error obteniendo usuarios de {sede}: {e}")
     finally:
@@ -256,18 +261,20 @@ def next_uid_for_sede(sede: str) -> Optional[int]:
             pass
     
     nxt = (max(ids) if ids else 0) + 1
-    return nxt if nxt <= 32767 else None
+    return nxt if is_uid_in_valid_range(nxt) else None
 
 def next_uid_global() -> int:
     """Obtiene el siguiente UID global disponible."""
-    ids = {int(r["UID"]) for r in read_csv(CSV_FILE) if r["UID"].isdigit()}
+    ids = {int(r["UID"]) for r in read_csv(CSV_FILE) 
+           if r["UID"].isdigit() and is_uid_in_valid_range(int(r["UID"]))}
     
     for ip, _ in SEDES.values():
         c = zk_connect(ip)
         try:
             if c:
                 users = c.get_users()
-                ids.update(int(str(u.uid)) for u in users if str(u.uid).isdigit())
+                ids.update(int(str(u.uid)) for u in users 
+                          if str(u.uid).isdigit() and is_uid_in_valid_range(int(u.uid)))
         except Exception as e:
             logging.error(f"Error obteniendo usuarios de {ip}: {e}")
         finally:
@@ -549,7 +556,13 @@ def listar_disp() -> None:
         tk.Entry(barra, textvariable=filtro, width=20).pack(side="left", padx=4)
 
         def refrescar(*_: Any) -> None:
-            tv.delete(*tv.get_children())
+            # Verificar si la ventana aún existe
+            try:
+                tv.delete(*tv.get_children())
+            except tk.TclError:
+                # La ventana fue cerrada, no hacer nada
+                return
+                
             pattern = filtro.get().lower()
             rows_local.clear()
             rows_local.update({r["UID"]: r for r in read_csv(CSV_FILE)})
@@ -571,11 +584,19 @@ def listar_disp() -> None:
                 ]
                 if pattern and not any(pattern in str(x).lower() for x in fila):
                     continue
-                tv.insert("", "end", values=fila)
+                
+                try:
+                    tv.insert("", "end", values=fila)
+                except tk.TclError:
+                    # La ventana fue cerrada durante la actualización
+                    return
 
         def actualizar_dispositivo() -> None:
             nonlocal dev_users
             try:
+                # Verificar si la ventana aún existe
+                if not win.winfo_exists():
+                    return
                 dev_users = leer_dispositivo()
             except Exception as e:
                 msg(messagebox.showerror, "Error", str(e))
@@ -611,8 +632,25 @@ def listar_disp() -> None:
 
         tv.bind("<Double-1>", sel)
 
-        # Permitir refresco desde otras funciones
-        setattr(root, "current_list_refresh", actualizar_dispositivo)
+        # Permitir refresco desde otras funciones, pero con verificación de existencia
+        def safe_refresh():
+            try:
+                if win.winfo_exists():
+                    actualizar_dispositivo()
+            except tk.TclError:
+                # La ventana ya no existe, limpiar la referencia
+                if hasattr(root, "current_list_refresh"):
+                    delattr(root, "current_list_refresh")
+
+        setattr(root, "current_list_refresh", safe_refresh)
+
+        # Limpiar la referencia cuando se cierre la ventana
+        def on_close():
+            if hasattr(root, "current_list_refresh"):
+                delattr(root, "current_list_refresh")
+            win.destroy()
+
+        win.protocol("WM_DELETE_WINDOW", on_close)
 
     tk.Button(w, text="Mostrar", command=mostrar).grid(row=1, column=0, pady=8)
 
@@ -742,8 +780,13 @@ def guardar() -> None:
     uid = uid_var.get().strip()
     fid = finger_var.get().split("–")[0].strip()
     
-    if not uid.isdigit() or int(uid) > 32767:
-        messagebox.showerror("UID", "Numérico ≤32767")
+    if not uid.isdigit():
+        messagebox.showerror("UID", "El UID debe ser numérico")
+        return
+        
+    uid_int = int(uid)
+    if not is_uid_in_valid_range(uid_int):
+        messagebox.showerror("UID", "El UID debe estar entre 1 y 32767")
         return
     
     rows = read_csv(CSV_FILE)
@@ -797,15 +840,23 @@ def actualizar() -> None:
         return
     
     uid = uid_var.get().strip()
-    conn = zk_connect(ip_var.get())
+    if not uid.isdigit():
+        messagebox.showerror("UID", "El UID debe ser numérico")
+        return
+        
+    uid_int = int(uid)
+    if not is_uid_in_valid_range(uid_int):
+        messagebox.showerror("UID", "El UID debe estar entre 1 y 32767")
+        return
     
+    conn = zk_connect(ip_var.get())
     if not conn:
         return
     
     try:
         priv = PERFIL_PRIV.get(perm_var.get(), 0)
         conn.set_user(
-            uid=int(uid), user_id=str(ced_var.get()),
+            uid=uid_int, user_id=str(ced_var.get()),
             name=str(nom_var.get())[:24],
             privilege=int(priv), group_id=1
         )
@@ -840,70 +891,97 @@ def actualizar() -> None:
             return
 
 def eliminar() -> None:
-    """Elimina usuario por cédula."""
+    """Elimina usuario por cédula o UID fuera de rango."""
     if not rights.get("delete", False):
         return
 
     uid_txt = uid_var.get().strip()
     cc_txt = str(ced_var.get()).strip()
 
-    modo_uid = uid_txt.isdigit() and int(uid_txt) > 32767
-    if modo_uid:
+    # Determinar si es UID fuera de rango o eliminación por cédula
+    modo_uid_fuera_rango = (uid_txt.isdigit() and 
+                           int(uid_txt) > 32767)
+    
+    if modo_uid_fuera_rango:
         llave = uid_txt
-        pregunta = f"Eliminar usuario con UID {llave} (fuera de rango)?"
+        pregunta = f"Eliminar usuario con UID {llave} (fuera de rango del dispositivo)?\nSolo se eliminará del CSV local."
+        eliminar_de_dispositivo = False
     else:
         if not cc_txt:
             messagebox.showerror("Eliminar", "Ingresa la cédula")
             return
         llave = cc_txt
         pregunta = f"Eliminar usuario con cédula {llave}?"
+        eliminar_de_dispositivo = True
 
     if not messagebox.askyesno("Confirmar", pregunta):
         return
 
-    conn = zk_connect(ip_var.get())
-    try:
-        if conn:
-            for u in conn.get_users():
-                if ((modo_uid and str(u.uid) == uid_txt) or 
-                    (not modo_uid and str(u.user_id) == cc_txt)):
-                    conn.delete_user(uid=int(u.uid))
-                    break
-    except Exception as e:
-        logging.error(f"Error eliminando del dispositivo: {e}")
-    finally:
-        if conn:
-            try:
-                conn.enable_device()
-                conn.disconnect()
-            except:
-                pass
+    # Eliminar del dispositivo solo si está en rango válido
+    if eliminar_de_dispositivo:
+        conn = zk_connect(ip_var.get())
+        try:
+            if conn:
+                for u in conn.get_users():
+                    if str(u.user_id) == cc_txt:
+                        # Verificar que el UID esté en rango válido antes de eliminar
+                        if is_uid_in_valid_range(int(u.uid)):
+                            conn.delete_user(uid=int(u.uid))
+                            logging.info(f"Usuario eliminado del dispositivo: UID {u.uid}, Cédula {cc_txt}")
+                        else:
+                            logging.warning(f"UID {u.uid} fuera de rango, no se puede eliminar del dispositivo")
+                        break
+        except Exception as e:
+            logging.error(f"Error eliminando del dispositivo: {e}")
+            # Continuar con la eliminación del CSV aunque falle el dispositivo
+        finally:
+            if conn:
+                try:
+                    conn.enable_device()
+                    conn.disconnect()
+                except:
+                    pass
 
+    # Eliminar del CSV
     rows = read_csv(CSV_FILE)
-    if modo_uid:
-        rows = [r for r in rows if r["UID"] != uid_txt]
-        log("Eliminar por UID", uid_txt, "")
+    if modo_uid_fuera_rango:
+        rows_filtradas = [r for r in rows if r["UID"] != uid_txt]
+        log("Eliminar por UID fuera de rango", uid_txt, "")
     else:
-        rows = [r for r in rows if str(r["C.C."]) != cc_txt]
+        rows_filtradas = [r for r in rows if str(r["C.C."]) != cc_txt]
         log("Eliminar por cédula", "", cc_txt)
 
-    write_csv(CSV_FILE, rows)
-    msg(messagebox.showinfo, "OK", "Eliminado de dispositivo y CSV")
+    write_csv(CSV_FILE, rows_filtradas)
+    
+    if modo_uid_fuera_rango:
+        msg(messagebox.showinfo, "OK", "Usuario eliminado del CSV (UID fuera de rango del dispositivo)")
+    else:
+        msg(messagebox.showinfo, "OK", "Usuario eliminado del dispositivo y CSV")
+    
     clear_form()
 
-    # Actualizar lista si está abierta
+    # Actualizar lista si está abierta y la ventana aún existe
     if hasattr(root, "current_list_refresh") and callable(getattr(root, "current_list_refresh")):
-        getattr(root, "current_list_refresh")()
+        try:
+            getattr(root, "current_list_refresh")()
+        except tk.TclError:
+            # La ventana de lista fue cerrada, limpiar la referencia
+            delattr(root, "current_list_refresh")
 
 def actualizar_resumen(mensaje: Optional[str] = None) -> None:
     """Actualiza el resumen en la interfaz."""
     try:
         registros = read_csv(CSV_FILE)
         total = len(registros)
-        ultimo_uid = max(
-            (int(r["UID"]) for r in registros if r["UID"].isdigit()),
-            default=0
-        )
+        
+        # Separar UIDs válidos e inválidos
+        uids_validos = [int(r["UID"]) for r in registros 
+                       if r["UID"].isdigit() and is_uid_in_valid_range(int(r["UID"]))]
+        uids_fuera_rango = [int(r["UID"]) for r in registros 
+                           if r["UID"].isdigit() and not is_uid_in_valid_range(int(r["UID"]))]
+        
+        ultimo_uid_valido = max(uids_validos) if uids_validos else 0
+        fuera_rango_count = len(uids_fuera_rango)
         
         if CSV_FILE.exists():
             fecha_mod = datetime.fromtimestamp(
@@ -913,8 +991,8 @@ def actualizar_resumen(mensaje: Optional[str] = None) -> None:
             fecha_mod = "N/A"
 
         resumen_txt = (
-            f"🧾 Total usuarios: {total}  |  Último UID: {ultimo_uid}  "
-            f"|  CSV modificado: {fecha_mod}"
+            f"🧾 Total usuarios: {total}  |  Último UID válido: {ultimo_uid_valido}  "
+            f"|  Fuera de rango: {fuera_rango_count}  |  CSV modificado: {fecha_mod}"
         )
         
         if mensaje:
