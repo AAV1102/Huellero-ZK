@@ -1126,7 +1126,7 @@ def build_main_gui(perfil_param: str) -> None:
     finger_var.trace_add("write", on_finger)
     row += 1
 
-    # Botones de acción
+    # Botones de acción principales (solo estos, sin duplicados)
     btn_save = tk.Button(
         root, text="💾 Guardar / Enrolar", bg="#4caf50",
         fg="white", width=18, command=guardar
@@ -1158,87 +1158,28 @@ def build_main_gui(perfil_param: str) -> None:
     btn_clear.grid(row=row, column=4)
     row += 1
 
-    # Frame inferior con botones de exportación
-    frm_inferior = tk.Frame(root)
-    frm_inferior.grid(row=row, column=0, columnspan=7, pady=10, sticky="w")
+    # Botones de exportación (solo estos, sin duplicados en frame inferior)
+    frm_export = tk.Frame(root)
+    frm_export.grid(row=row, column=0, columnspan=7, pady=10, sticky="w")
     row += 1
-    tk.Label(frm_inferior, text="Acciones:").pack(side="left", padx=4)
-
-    frm_acciones = tk.Frame(frm_inferior)
-    frm_acciones.pack(pady=4)
-
-    col = 0
-    if rights.get("create"):
-        tk.Button(
-            frm_acciones, text="✅ Guardar / Enrolar", bg="green", fg="white",
-            command=guardar
-        ).grid(row=0, column=col, padx=4)
-        col += 1
-
-    if rights.get("update"):
-        tk.Button(
-            frm_acciones, text="Actualizar", bg="dodgerblue", fg="white",
-            command=actualizar
-        ).grid(row=0, column=col, padx=4)
-        col += 1
-
-    if rights.get("delete"):
-        tk.Button(
-            frm_acciones, text="Eliminar por Cédula", bg="red", fg="white",
-            command=eliminar
-        ).grid(row=0, column=col, padx=4)
-        col += 1
-
-    if rights.get("mark"):
-        tk.Button(
-            frm_acciones, text="📥 Marcar Entrada", bg="turquoise", fg="black",
-            command=lambda: marcar("entrada")
-        ).grid(row=0, column=col, padx=4)
-        col += 1
-        tk.Button(
-            frm_acciones, text="📤 Marcar Salida", bg="orange", fg="black",
-            command=lambda: marcar("salida")
-        ).grid(row=0, column=col, padx=4)
-        col += 1
-
-    tk.Button(frm_acciones, text="🧹 Limpiar", command=clear_form).grid(
-        row=0, column=col, padx=4
-    )
-
-    # Botones de exportación
-    frm_export = tk.Frame(frm_inferior)
-    frm_export.pack(pady=4)
+    
+    tk.Label(frm_export, text="Exportar:").pack(side="left", padx=4)
 
     col = 0
     if rights.get("export"):
-        tk.Button(frm_export, text="📄 Reg PDF", command=exp_reg_pdf).grid(
-            row=0, column=col, padx=4
-        )
-        col += 1
-        tk.Button(frm_export, text="📊 Reg XLS", command=exp_reg_xls).grid(
-            row=0, column=col, padx=4
-        )
-        col += 1
+        tk.Button(frm_export, text="📄 Reg PDF", command=exp_reg_pdf).pack(side="left", padx=4)
+        tk.Button(frm_export, text="📊 Reg XLS", command=exp_reg_xls).pack(side="left", padx=4)
 
     if rights.get("viewlog"):
-        tk.Button(frm_export, text="📝 Bitácora", command=ver_log).grid(
-            row=0, column=col, padx=4
-        )
-        col += 1
-        tk.Button(frm_export, text="📄 Bit PDF", command=exp_log_pdf).grid(
-            row=0, column=col, padx=4
-        )
-        col += 1
-        tk.Button(frm_export, text="📊 Bit XLS", command=exp_log_xls).grid(
-            row=0, column=col, padx=4
-        )
-        col += 1
+        tk.Button(frm_export, text="📝 Bitácora", command=ver_log).pack(side="left", padx=4)
+        tk.Button(frm_export, text="📄 Bit PDF", command=exp_log_pdf).pack(side="left", padx=4)
+        tk.Button(frm_export, text="📊 Bit XLS", command=exp_log_xls).pack(side="left", padx=4)
 
     if perfil == "Exportador":
         tk.Button(
             frm_export, text="📤 Entradas/Salidas XLS",
             command=exportar_entradas_salidas
-        ).grid(row=1, column=0, columnspan=5, pady=6)
+        ).pack(side="left", padx=4)
 
     # Frame resumen
     frm_resumen = tk.Frame(root)
